@@ -11,6 +11,7 @@ import (
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/validation"
+	"github.com/oauth2-proxy/oauth2-proxy/v7/server"
 	"github.com/spf13/pflag"
 )
 
@@ -50,12 +51,14 @@ func main() {
 		return
 	}
 
+	opts.SetVersion(VERSION)
+
 	if err = validation.Validate(opts); err != nil {
 		logger.Fatalf("%s", err)
 	}
 
-	validator := NewValidator(opts.EmailDomains, opts.AuthenticatedEmailsFile)
-	oauthproxy, err := NewOAuthProxy(opts, validator)
+	validator := server.NewValidator(opts.EmailDomains, opts.AuthenticatedEmailsFile)
+	oauthproxy, err := server.NewOAuthProxy(opts, validator)
 	if err != nil {
 		logger.Fatalf("ERROR: Failed to initialise OAuth2 Proxy: %v", err)
 	}

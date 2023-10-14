@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -108,10 +108,23 @@ type OAuthProxy struct {
 	serveMux          *mux.Router
 	redirectValidator redirect.Validator
 	appDirector       redirect.AppDirector
+
+	dontListen bool
 }
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
 func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthProxy, error) {
+	return newOAuthProxy(opts, validator, false, nil)
+}
+
+// NewOAuthProxy creates a new instance of OAuthProxy from the options provided.
+// This version of the constructor is used when the proxy is embedded in another
+// application and does not need to start its own listener.
+func NewEmbeddedOauthProxy(opts *options.Options, validator func(string) bool, upstreamProxy http.Handler) (*OAuthProxy, error) {
+	return newOAuthProxy(opts, validator, true, upstreamProxy)
+}
+
+func newOAuthProxy(opts *options.Options, validator func(string) bool, dontListen bool, upstreamProxy http.Handler) (*OAuthProxy, error) {
 	sessionStore, err := sessions.NewSessionStore(&opts.Session, &opts.Cookie)
 	if err != nil {
 		return nil, fmt.Errorf("error initialising session store: %v", err)
@@ -137,7 +150,7 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 		CustomLogo:       opts.Templates.CustomLogo,
 		ProxyPrefix:      opts.ProxyPrefix,
 		Footer:           opts.Templates.Footer,
-		Version:          VERSION,
+		Version:          opts.GetVersion(),
 		Debug:            opts.Templates.Debug,
 		ProviderName:     buildProviderName(provider, opts.Providers[0].Name),
 		SignInMessage:    buildSignInMessage(opts),
@@ -147,9 +160,12 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 		return nil, fmt.Errorf("error initialising page writer: %v", err)
 	}
 
-	upstreamProxy, err := upstream.NewProxy(opts.UpstreamServers, opts.GetSignatureData(), pageWriter)
-	if err != nil {
-		return nil, fmt.Errorf("error initialising upstream proxy: %v", err)
+	if upstreamProxy == nil {
+		proxy, err := upstream.NewProxy(opts.UpstreamServers, opts.GetSignatureData(), pageWriter)
+		if err != nil {
+			return nil, fmt.Errorf("error initialising upstream proxy: %v", err)
+		}
+		upstreamProxy = proxy
 	}
 
 	if opts.SkipJwtBearerTokens {
@@ -235,9 +251,14 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 		upstreamProxy:      upstreamProxy,
 		redirectValidator:  redirectValidator,
 		appDirector:        appDirector,
+
+		dontListen: dontListen,
 	}
 	p.buildServeMux(opts.ProxyPrefix)
 
+	if dontListen {
+		return p, nil
+	}
 	if err := p.setupServer(opts); err != nil {
 		return nil, fmt.Errorf("error setting up server: %v", err)
 	}
@@ -246,6 +267,9 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 }
 
 func (p *OAuthProxy) Start() error {
+	if p.dontListen {
+		return errors.New("cannot start proxy that was created with NewEmbeddedOauthProxy")
+	}
 	if p.server == nil {
 		// We have to call setupServer before Start is called.
 		// If this doesn't happen it's a programming error.
