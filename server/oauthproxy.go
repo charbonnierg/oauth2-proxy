@@ -21,6 +21,7 @@ import (
 	ipapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/ip"
 	middlewareapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
+	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/sessions"
 	sessionsapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/sessions"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/app/pagewriter"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/app/redirect"
@@ -34,7 +35,7 @@ import (
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/middleware"
 	requestutil "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests/util"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/sessions"
+	sessionstore "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/sessions"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/upstream"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/providers"
 )
@@ -114,20 +115,23 @@ type OAuthProxy struct {
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
 func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthProxy, error) {
-	return newOAuthProxy(opts, validator, false, nil)
+	return newOAuthProxy(opts, validator, false, nil, nil)
 }
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided.
 // This version of the constructor is used when the proxy is embedded in another
 // application and does not need to start its own listener.
-func NewEmbeddedOauthProxy(opts *options.Options, validator func(string) bool, upstreamProxy http.Handler) (*OAuthProxy, error) {
-	return newOAuthProxy(opts, validator, true, upstreamProxy)
+func NewEmbeddedOauthProxy(opts *options.Options, validator func(string) bool, store sessions.SessionStore, upstreamProxy http.Handler) (*OAuthProxy, error) {
+	return newOAuthProxy(opts, validator, true, store, upstreamProxy)
 }
 
-func newOAuthProxy(opts *options.Options, validator func(string) bool, dontListen bool, upstreamProxy http.Handler) (*OAuthProxy, error) {
-	sessionStore, err := sessions.NewSessionStore(&opts.Session, &opts.Cookie)
-	if err != nil {
-		return nil, fmt.Errorf("error initialising session store: %v", err)
+func newOAuthProxy(opts *options.Options, validator func(string) bool, dontListen bool, sessionStore sessions.SessionStore, upstreamProxy http.Handler) (*OAuthProxy, error) {
+	if sessionStore == nil {
+		store, err := sessionstore.NewSessionStore(&opts.Session, &opts.Cookie)
+		if err != nil {
+			return nil, fmt.Errorf("error initialising session store: %v", err)
+		}
+		sessionStore = store
 	}
 
 	var basicAuthValidator basic.Validator
